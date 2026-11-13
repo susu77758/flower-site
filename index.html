@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FLORA · 绽放 — 滚轮与手势控制开花</title>
+<style>
+  :root {
+    --bg: #e7e3df;          /* 页面底色，取自影像背景的中间调 */
+    --ink: #3a342c;
+    --ink-soft: #8a8377;
+    --accent: #c05a3c;      /* 取自百合花瓣的橘红 */
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    color: var(--ink);
+  }
+  #stageFrame {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* 影像卡：逐帧画布放在一张圆角"胶片卡"里 */
+  #frameCard {
+    height: min(76vh, 760px);
+    aspect-ratio: 720 / 1280;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(58,52,44,.18), 0 4px 14px rgba(58,52,44,.10);
+    background: #dcd8d4;
+  }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  /* ---------- 顶部导航 ---------- */
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 22px 36px; z-index: 10;
+  }
+  .logo { display: flex; align-items: baseline; gap: 12px; }
+  .logo .mark { font-size: 20px; letter-spacing: 4px; font-weight: 600; }
+  .logo .sub { font-size: 11px; letter-spacing: 3px; color: var(--ink-soft); }
+  .nav { font-size: 12px; letter-spacing: 3px; color: var(--ink-soft); display: flex; gap: 20px; }
+  .nav .tab { cursor: pointer; padding-bottom: 4px; transition: color .2s; }
+  .nav .tab:hover { color: var(--ink); }
+  .nav .tab.active { color: var(--ink); border-bottom: 1px solid var(--ink); }
+
+  /* ---------- 左侧文案 ---------- */
+  .hero-left {
+    position: fixed; left: 48px; top: 50%; transform: translateY(-58%);
+    z-index: 10; pointer-events: none;
+  }
+  .hero-left .tag { font-size: 11px; letter-spacing: 4px; color: var(--ink-soft); margin-bottom: 18px; }
+  .hero-left h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-style: italic; font-weight: 400;
+    font-size: 58px; line-height: 1.05; letter-spacing: 1px;
+  }
+  .hero-left .cn { margin-top: 22px; font-size: 14px; letter-spacing: 6px; color: var(--ink-soft); }
+
+  /* ---------- 右侧花之档案 ---------- */
+  .hero-right {
+    position: fixed; right: 48px; top: 50%; transform: translateY(-52%);
+    z-index: 10; text-align: left; width: 200px; pointer-events: none;
+  }
+  .hero-right .no { font-size: 11px; letter-spacing: 3px; color: var(--ink-soft); }
+  .hero-right .name { margin-top: 14px; font-size: 26px; letter-spacing: 6px; }
+  .hero-right .latin {
+    margin-top: 6px; font-family: Georgia, serif; font-style: italic;
+    font-size: 15px; color: var(--ink-soft);
+  }
+  .hero-right .rule { width: 40px; height: 1px; background: rgba(58,52,44,.3); margin: 18px 0; }
+  .hero-right .lang { font-size: 12px; letter-spacing: 4px; color: var(--ink-soft); }
+
+  /* ---------- 底部提示条与进度 ---------- */
+  .bottombar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 36px; font-size: 12px; letter-spacing: 2px; color: var(--ink-soft);
+    border-top: 1px solid rgba(58,52,44,.12);
+  }
+  .bottombar b { color: var(--ink); font-weight: 500; }
+
+  .progress-wrap {
+    position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%);
+    z-index: 10; display: flex; align-items: center; gap: 14px;
+    font-size: 12px; letter-spacing: 2px; color: var(--ink-soft);
+  }
+  .progress-wrap .bar {
+    width: 220px; height: 3px; background: rgba(58,52,44,.16);
+    border-radius: 2px; overflow: hidden;
+  }
+  .progress-wrap .bar i {
+    display: block; height: 100%; width: 0%;
+    background: var(--accent); border-radius: 2px;
+  }
+  .progress-wrap .pct { min-width: 44px; text-align: left; color: var(--ink); }
+
+  /* ---------- 手势控制 ---------- */
+  .gesture-ui { position: fixed; left: 24px; bottom: 54px; z-index: 20; }
+  .gesture-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font: inherit; font-size: 12px; letter-spacing: 2px; color: var(--ink);
+    background: rgba(255,255,255,.55); border: 1px solid rgba(58,52,44,.22);
+    border-radius: 999px; padding: 9px 18px; cursor: pointer;
+    backdrop-filter: blur(6px); transition: background .2s, border-color .2s;
+  }
+  .gesture-btn:hover { background: rgba(255,255,255,.85); }
+  .gesture-btn .dot { width: 6px; height: 6px; border-radius: 50%; background: #b9b2a8; }
+  .gesture-btn.on .dot { background: var(--accent); }
+  .g-panel { display: none; flex-direction: column; gap: 8px; width: 132px; }
+  .g-panel.show { display: flex; }
+  .g-cam {
+    position: relative; width: 132px; height: 176px; border-radius: 12px; overflow: hidden;
+    background: #26221c; box-shadow: 0 10px 26px rgba(58,52,44,.22);
+  }
+  #gvideo { display: none; }
+  #gcanvas { width: 100%; height: 100%; display: block; }
+  .g-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; letter-spacing: 1px; color: var(--ink-soft);
+  }
+  .g-meta b { color: var(--ink); font-weight: 500; }
+  .g-tip {
+    font-size: 11px; line-height: 1.6; letter-spacing: 1px; color: var(--ink-soft);
+  }
+
+  /* ---------- 加载遮罩 ---------- */
+  #loading {
+    position: fixed; inset: 0; z-index: 50; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; color: var(--ink-soft); font-size: 13px; letter-spacing: 3px;
+    transition: opacity .6s ease;
+  }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading .bar { width: 240px; height: 3px; background: rgba(58,52,44,.15); border-radius: 2px; overflow: hidden; }
+  #loading .bar i { display: block; height: 100%; width: 0%; background: var(--accent); }
+
+  @media (max-width: 900px) {
+    .hero-left h1 { font-size: 38px; }
+    .hero-left { left: 24px; }
+    .hero-right { display: none; }
+    .progress-wrap .bar { width: 140px; }
+    #frameCard { height: min(68vh, 640px); }
+  }
+  /* 手机竖屏：让影像居中占主视野，文字让位，操作区贴在安全区 */
+  @media (max-width: 700px) {
+    .hero-left { display: none; }
+    .topbar { padding: 16px 20px; }
+    .logo .sub { display: none; }
+    #frameCard { height: min(70vh, 620px); border-radius: 12px; }
+    .bottombar { padding: 10px 16px; font-size: 11px; letter-spacing: 1px; }
+    .bottombar .credit { display: none; }
+    .progress-wrap { bottom: 46px; gap: 10px; font-size: 11px; }
+    .progress-wrap .bar { width: 110px; }
+    .gesture-ui { left: 16px; bottom: 84px; }
+    .g-panel, .g-cam { width: 104px; }
+    .g-cam { height: 138px; }
+  }
+</style>
+</head>
+<body>
+<div id="stageFrame">
+  <div id="frameCard"><canvas id="stage" width="720" height="1280"></canvas></div>
+</div>
+
+<header class="topbar">
+  <div class="logo"><span class="mark">FLORA</span><span class="sub">FLOWER IN MOTION</span></div>
+  <nav class="nav" id="nav"><!-- 花种切换标签：由脚本按登记表自动生成 --></nav>
+</header>
+
+<div class="hero-left">
+  <div class="tag">BLOOM · 01</div>
+  <h1>In full<br />bloom.</h1>
+  <div class="cn" id="fCn">让滚轮，唤醒一朵百合。</div>
+</div>
+
+<div class="hero-right">
+  <div class="no" id="fNo">01 / FLOWER</div>
+  <div class="name" id="fName">百　合</div>
+  <div class="latin" id="fLatin">Lily · Lilium</div>
+  <div class="rule"></div>
+  <div class="lang" id="fLang">花语 · 纯洁 · 百年好合</div>
+</div>
+
+<div class="progress-wrap">
+  <span>闭合</span>
+  <div class="bar"><i id="bar"></i></div>
+  <span class="pct" id="pct">0%</span>
+  <span>盛放</span>
+</div>
+
+<footer class="bottombar">
+  <span><b>滚轮或手指拖动控制开花</b>　手机点左下角可开启手势控制</span>
+  <span class="credit">逐帧影像 · 滚轮 / 手势精确控制</span>
+</footer>
+
+<div class="gesture-ui">
+  <button class="gesture-btn" id="gbtn"><span class="dot"></span><span id="gbtnText">手势控制</span></button>
+  <div class="g-panel" id="gpanel">
+    <div class="g-cam">
+      <video id="gvideo" playsinline muted></video>
+      <canvas id="gcanvas" width="132" height="176"></canvas>
+    </div>
+    <div class="g-meta"><span id="gstate">等待手部</span><b id="gval">--</b></div>
+    <div class="g-tip">拇指与食指捏合：合拢＝花苞，张开＝盛放</div>
+  </div>
+</div>
+
+<div id="loading">
+  <span id="loadText">正在加载逐帧影像…</span>
+  <div class="bar"><i id="loadBar"></i></div>
+  <span id="loadPct">0%</span>
+</div>
+
+<script>
+/* ================================================================
+ * 逐帧影像开花交互
+ * 原理：把开花延时视频拆成 121 张逐帧图片。滚轮只改变一个
+ * 0~1 的"进度值"，页面用平滑插值逼近它，再精确绘制对应的
+ * 两帧并交叉淡化——所以动作永远顺滑、可倒放、不会跳帧。
+ * ================================================================ */
+(function () {
+  /* ---- 0. 花种登记表 ----
+   * 增加新花种只需两步：
+   *   ① 把开花视频拆帧，放进 frames-花名/ 文件夹（f_001.webp …）；
+   *   ② 在下面数组里照示例加一行配置，顶部自动出现切换标签。
+   * 每种花的帧图在第一次点它时才加载，不影响首屏速度。
+   */
+  const FLOWERS = [
+    {
+      id: 'lily', dir: 'frames', frames: 121,
+      w: 720, h: 1280,
+      tab: '百合 LILY', cn: '百　合', latin: 'Lily · Lilium',
+      lang: '花语 · 纯洁 · 百年好合',
+      slogan: '让滚轮，唤醒一朵百合。',
+      accent: '#c05a3c', bg: '#e7e3df',
+    },
+    {
+      id: 'physalis', dir: 'frames-physalis', frames: 121,
+      w: 720, h: 720,
+      tab: '灯笼果 PHYSALIS', cn: '灯笼果', latin: 'Physalis · Cape Gooseberry',
+      lang: '秋日金果 · 一盏自然的小灯笼',
+      slogan: '让滚轮，点亮一盏灯笼果。',
+      accent: '#d99a2b', bg: '#f1eff1',
+    },
+    {
+      id: 'strepto-purple', dir: 'frames-strepto-purple', frames: 121,
+      w: 720, h: 1280,
+      tab: '紫海角苣苔 STREPTO', cn: '紫海角苣苔', latin: 'Streptocarpus · Cape Primrose',
+      lang: '深紫波边 · 静谧绽放',
+      slogan: '让滚轮，唤醒一朵紫苣苔。',
+      accent: '#5f4a7d', bg: '#ece9ec',
+    },
+    {
+      id: 'strepto-pink', dir: 'frames-strepto-pink', frames: 121,
+      w: 720, h: 720,
+      tab: '粉海角苣苔 STREPTO', cn: '粉海角苣苔', latin: 'Streptocarpus · Pink Veins',
+      lang: '粉白网纹 · 春日呢喃',
+      slogan: '让滚轮，唤醒一朵粉苣苔。',
+      accent: '#c25a7d', bg: '#efedee',
+    },
+    /* ---- 新花种登记示例（去掉注释即可生效）----
+    {
+      id: 'peony', dir: 'frames-peony', frames: 90,
+      w: 720, h: 1280,
+      tab: '牡丹 PEONY', cn: '牡　丹', latin: 'Peony · Paeonia suffruticosa',
+      lang: '花语 · 富贵 · 圆满',
+      slogan: '让滚轮，唤醒一朵牡丹。',
+      accent: '#c4756b', bg: '#ece6e2',
+    },
+    */
+  ];
+  const QS = location.search || '';   // 分享链接的 sharecode 必须随每个图片请求携带
+  const PAD = (n) => String(n).padStart(3, '0');
+  let cur = FLOWERS[0];
+
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const barEl = document.getElementById('bar');
+  const pctEl = document.getElementById('pct');
+  const loadBar = document.getElementById('loadBar');
+  const loadPct = document.getElementById('loadPct');
+  const loadText = document.getElementById('loadText');
+
+  /* ---- 0.5 生成顶部切换标签 ---- */
+  const nav = document.getElementById('nav');
+  FLOWERS.forEach((f, i) => {
+    const s = document.createElement('span');
+    s.className = 'tab' + (i === 0 ? ' active' : '');
+    s.textContent = f.tab;
+    s.addEventListener('click', () => setFlower(i));
+    nav.appendChild(s);
+  });
+
+  /* ---- 1. 预加载某种花的全部帧（带缓存：加载过就不再加载） ----
+   * 注意：分享链接要求每个请求都带 ?sharecode=...，
+   * 所以图片地址必须继承当前页面的查询参数，否则会被拒（403）。
+   */
+  function loadFlower(f) {
+    if (f.imgs) return Promise.resolve(f.imgs);
+    loadText.textContent = `正在加载${f.cn.replace(/\s/g, '')}逐帧影像…`;
+    document.getElementById('loading').classList.remove('done');
+    return new Promise((resolve, reject) => {
+      const imgs = new Array(f.frames);
+      let loaded = 0, failed = 0;
+      const done = () => {
+        if (failed > f.frames * 0.5) { reject(new Error('frames failed')); return; }
+        f.imgs = imgs;
+        resolve(imgs);
+      };
+      for (let i = 0; i < f.frames; i++) {
+        const im = new Image();
+        im.onload = () => {
+          loaded++;
+          const p = Math.round((loaded / f.frames) * 100);
+          loadBar.style.width = p + '%';
+          loadPct.textContent = p + '%';
+          if (loaded + failed === f.frames) done();
+        };
+        im.onerror = () => {
+          failed++;
+          if (failed === 3) {          // 连续失败：直接提示，不让用户干等
+            loadText.textContent =
+              '影像加载失败：请用完整链接打开（必须包含 ?sharecode=… 部分）';
+          }
+          if (loaded + failed === f.frames) done();
+        };
+        im.src = f.dir + '/f_' + PAD(i + 1) + '.webp' + QS;
+        imgs[i] = im;
+      }
+    });
+  }
+
+  /* ---- 1.5 切换花种：换帧序列 + 换文案 + 换主题色 ---- */
+  let switching = false;
+  async function setFlower(i) {
+    const f = FLOWERS[i];
+    if (!f || f === cur || switching) return;
+    switching = true;
+    try { await loadFlower(f); } catch (e) { switching = false; return; }
+    cur = f;
+    canvas.width = f.w; canvas.height = f.h;
+    document.getElementById('frameCard').style.aspectRatio = f.w + ' / ' + f.h;
+    document.documentElement.style.setProperty('--accent', f.accent);
+    document.documentElement.style.setProperty('--bg', f.bg);
+    document.getElementById('fNo').textContent = String(i + 1).padStart(2, '0') + ' / FLOWER';
+    document.getElementById('fName').textContent = f.cn;
+    document.getElementById('fLatin').textContent = f.latin;
+    document.getElementById('fLang').textContent = f.lang;
+    document.getElementById('fCn').textContent = f.slogan;
+    nav.querySelectorAll('.tab').forEach((t, k) => t.classList.toggle('active', k === i));
+    lastDrawn = -1;
+    document.getElementById('loading').classList.add('done');
+    switching = false;
+  }
+
+  /* ---- 2. 进度状态：目标值 + 平滑当前值（稳定的来源） ---- */
+  let target = 0.06;      // 开场停在含苞待放的位置
+  let current = target;
+  let lastDrawn = -1;
+
+  function draw() {
+    const f = current * (cur.frames - 1);  // 映射到帧序号（浮点）
+    const i0 = Math.max(0, Math.min(cur.frames - 1, Math.floor(f)));
+    const frac = f - i0;                   // 与下一帧之间的过渡比例
+    if (i0 === lastDrawn) return;          // 没变化就不重绘（省电、稳定）
+    lastDrawn = i0;
+    const a = cur.imgs[i0], b = cur.imgs[Math.min(i0 + 1, cur.frames - 1)];
+    if (a.complete && a.naturalWidth) ctx.drawImage(a, 0, 0, canvas.width, canvas.height);
+    if (frac > 0.002 && b.complete && b.naturalWidth) {
+      ctx.globalAlpha = frac;              // 两帧交叉淡化，滚轮再细也有"过渡帧"
+      ctx.drawImage(b, 0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function loop() {
+    current += (target - current) * 0.14;  // 指数平滑：动作柔顺不抖动
+    if (Math.abs(target - current) < 0.0004) current = target;
+    draw();
+    const p = Math.round(current * 100);
+    barEl.style.width = p + '%';
+    pctEl.textContent = p + '%';
+    requestAnimationFrame(loop);
+  }
+
+  /* ---- 3. 输入：滚轮 / 方向键 / 触屏拖动，全部只改 target ---- */
+  const STEP = 0.0035;
+  addEventListener('wheel', (e) => {
+    e.preventDefault();
+    target = Math.max(0, Math.min(1, target + e.deltaY * STEP));
+  }, { passive: false });
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'PageDown') target = Math.min(1, target + 0.06);
+    if (e.key === 'ArrowUp' || e.key === 'PageUp') target = Math.max(0, target - 0.06);
+  });
+
+  let dragging = false, lastY = 0;
+  canvas.addEventListener('pointerdown', (e) => { dragging = true; lastY = e.clientY; });
+  addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    target = Math.max(0, Math.min(1, target - (e.clientY - lastY) * 0.004));
+    lastY = e.clientY;
+  });
+  addEventListener('pointerup', () => { dragging = false; });
+
+  /* ---- 3.5 手势控制（可选）：摄像头 + MediaPipe 手部识别 ----
+   * 拇指尖(4) 与 食指尖(8) 的距离 ÷ 手掌参考长度 = 捏合比例，
+   * 再映射成 0~1 的开合目标值写进 target，与滚轮共用同一条链路，
+   * 所以两种输入可以随时混用，动作一样顺滑。
+   */
+  const gbtn = document.getElementById('gbtn');
+  const gbtnText = document.getElementById('gbtnText');
+  const gpanel = document.getElementById('gpanel');
+  const gvideo = document.getElementById('gvideo');
+  const gcanvas = document.getElementById('gcanvas');
+  const gctx = gcanvas.getContext('2d');
+  const gstate = document.getElementById('gstate');
+  const gval = document.getElementById('gval');
+
+  const g = { on: false, stream: null, lm: null, currentLm: null, lastT: -1, lastDetect: 0, lastSeen: 0, pinch: null };
+  window.__flora = {
+    get pinch() { return g.pinch; },
+    get progress() { return current; },
+    get target() { return target; },
+    get hand() { return !!g.lm; },
+    get gestureOn() { return g.on; },
+  };
+
+  const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+                      [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+  async function loadHandModel() {
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const files = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const opt = (delegate) => ({
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate,
+      },
+      runningMode: 'VIDEO', numHands: 1,
+    });
+    try { return await vision.HandLandmarker.createFromOptions(files, opt('GPU')); }
+    catch (e) { return await vision.HandLandmarker.createFromOptions(files, opt('CPU')); }
+  }
+
+  async function enableGesture() {
+    gbtnText.textContent = '准备中…';
+    /* 第一步：开摄像头 */
+    try {
+      g.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
+      });
+      gvideo.srcObject = g.stream;
+      await gvideo.play();
+    } catch (err) {
+      console.warn('[gesture:camera]', err);
+      gpanel.classList.add('show');
+      gstate.textContent = '摄像头不可用';
+      gbtnText.textContent = '手势控制';
+      setTimeout(() => { if (!g.on) gpanel.classList.remove('show'); }, 2600);
+      return;
+    }
+    gpanel.classList.add('show');
+    previewLoop();
+    /* 第二步：加载识别引擎（与预览解耦，引擎失败不影响看画面） */
+    try {
+      g.lm = await loadHandModel();
+    } catch (err) {
+      console.warn('[gesture:model]', err);
+      gstate.textContent = '识别引擎加载失败，可改用手指拖动';
+      gbtnText.textContent = '手势控制';
+      return;
+    }
+    g.on = true;
+    gbtn.classList.add('on');
+    gbtnText.textContent = '手势已开启';
+    gstate.textContent = '等待手部';
+    detect();
+  }
+
+  function disableGesture() {
+    g.on = false;
+    if (g.stream) g.stream.getTracks().forEach((t) => t.stop());
+    g.stream = null; g.pinch = null; g.lm = null;
+    gpanel.classList.remove('show');
+    gbtn.classList.remove('on');
+    gbtnText.textContent = '手势控制';
+  }
+
+  gbtn.addEventListener('click', () => { g.on ? disableGesture() : enableGesture(); });
+
+  /* 预览循环：只负责把摄像头画面画进小窗（识别失败也照常显示） */
+  function previewLoop() {
+    if (!g.stream) return;
+    requestAnimationFrame(previewLoop);
+    if (gvideo.readyState >= 2) drawPreview(g.lm ? g.currentLm : null);
+  }
+
+  /* 识别循环：约 16 次/秒，省电且足够顺滑 */
+  let detectErrors = 0;
+  function detect() {
+    if (!g.on) return;
+    requestAnimationFrame(detect);
+    const now = performance.now();
+    if (now - g.lastDetect < 60) return;
+    g.lastDetect = now;
+    if (!g.lm || gvideo.readyState < 2 || gvideo.currentTime === g.lastT) return;
+    g.lastT = gvideo.currentTime;
+    let res = null;
+    try { res = g.lm.detectForVideo(gvideo, now); detectErrors = 0; }
+    catch (e) {
+      if (++detectErrors === 4) gstate.textContent = '识别异常，可改用手指拖动';
+      return;
+    }
+    const lm = res && res.landmarks && res.landmarks[0];
+    g.currentLm = lm || null;
+    if (lm) {
+      g.lastSeen = now;
+      const ref = Math.max(Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y), 1e-4);
+      const ratio = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref;
+      g.pinch = ratio;
+      const v = Math.max(0, Math.min(1, (ratio - 0.30) / (1.10 - 0.30)));
+      target += (v - target) * 0.35;          // 轻平滑，抑制手指抖动
+      gstate.textContent = '已识别手部';
+      gval.textContent = Math.round(v * 100) + '%';
+    } else if (now - g.lastSeen > 400) {
+      gstate.textContent = '等待手部';
+      gval.textContent = '--';
+    }
+    drawPreview(lm);
+  }
+
+  /* 摄像头小窗：镜像画面 + 绿色骨架（与参考视频一致） */
+  function drawPreview(lm) {
+    const W = gcanvas.width, H = gcanvas.height;
+    const vw = gvideo.videoWidth || 640, vh = gvideo.videoHeight || 480;
+    if (!vw) return;
+    const s = Math.max(W / vw, H / vh);
+    const dw = vw * s, dh = vh * s;
+    const ox = (W - dw) / 2, oy = (H - dh) / 2;
+    gctx.save();
+    gctx.translate(W, 0); gctx.scale(-1, 1);      // 镜像，像照镜子一样自然
+    gctx.drawImage(gvideo, ox, oy, dw, dh);
+    gctx.restore();
+    if (!lm) return;
+    const P = lm.map((p) => ({ x: W - (ox + p.x * dw), y: oy + p.y * dh }));
+    gctx.strokeStyle = '#8fd98f'; gctx.lineWidth = 2;
+    HAND_LINKS.forEach(([a, b]) => {
+      gctx.beginPath(); gctx.moveTo(P[a].x, P[a].y); gctx.lineTo(P[b].x, P[b].y); gctx.stroke();
+    });
+    gctx.fillStyle = '#eaf7ea';
+    P.forEach((p) => { gctx.beginPath(); gctx.arc(p.x, p.y, 2.2, 0, 7); gctx.fill(); });
+    // 捏合参考线：拇指尖 ↔ 食指尖
+    gctx.strokeStyle = '#f0b64c'; gctx.lineWidth = 2.4;
+    gctx.beginPath(); gctx.moveTo(P[4].x, P[4].y); gctx.lineTo(P[8].x, P[8].y); gctx.stroke();
+    [4, 8].forEach((i) => {
+      gctx.beginPath(); gctx.arc(P[i].x, P[i].y, 6, 0, 7);
+      gctx.strokeStyle = '#f0b64c'; gctx.lineWidth = 2; gctx.stroke();
+    });
+  }
+
+  /* ---- 4. 启动 ---- */
+  loadFlower(cur).then(() => {
+    document.getElementById('loading').classList.add('done');
+    lastDrawn = -1;
+    loop();
+  }).catch(() => { /* 大面积失败时保留错误提示，不进入空白页 */ });
+})();
+</script>
+</body>
+</html>
